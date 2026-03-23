@@ -1,0 +1,40 @@
+%% databricks-mlops-aws — architecture (Mermaid source)
+%% Use in GitHub/GitLab by pasting into a fenced ```mermaid block, or open with https://mermaid.live/
+%% Optional CLI: npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-architecture.mmd -o architecture.svg
+
+flowchart TB
+  subgraph operators [Operators and automation]
+    Dev[Developers]
+    PulumiCLI[Pulumi CLI / CI]
+  end
+
+  subgraph aws [AWS account - customer]
+    S3[(S3 bucket\nml artifacts / scoring outputs)]
+    IAM[AWS credentials\nfor Pulumi]
+  end
+
+  subgraph databricks [Databricks workspace]
+    subgraph managed [Platform-managed]
+      MLflowReg[MLflow tracking and\nModel Registry]
+    end
+    Exp[MLflow experiment\n/Shared/mlops-experiments-*]
+    SQLW[Serverless SQL warehouse\nPRO + serverless compute]
+    Policy[Cluster policy\nclassic job clusters]
+  end
+
+  Dev --> PulumiCLI
+  PulumiCLI --> IAM
+  IAM --> S3
+  PulumiCLI --> databricks
+
+  Exp -.->|logs runs| MLflowReg
+  Jobs[Jobs / notebooks\nserverless or classic] -.->|optional| SQLW
+  Jobs -.->|optional classic| Policy
+  Train[Training pipelines] -.->|read/write| S3
+  Train -.->|log metrics| Exp
+
+  style S3 fill:#f4f4f4
+  style Exp fill:#e8f4fc
+  style SQLW fill:#e8f4fc
+  style Policy fill:#fff4e6
+  style MLflowReg fill:#e8fce8

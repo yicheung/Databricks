@@ -1,0 +1,9 @@
+# Copy to Pulumi.dev.yaml and fill values (never commit secrets).
+config:
+  aws:region: us-east-1
+  databricks-mlops-aws:environment: dev
+  # Databricks workspace URL, e.g. https://dbc-xxxxxxxx.cloud.databricks.com
+  databricks:host: https://YOUR_WORKSPACE.cloud.databricks.com
+  # Prefer OIDC / env var in CI; for local dev you can use: pulumi config set --secret databricks:token YOUR_PAT
+  # databricks:token:
+  #   secure: AAABBB...
