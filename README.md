@@ -1,63 +1,94 @@
 # databricks-mlops-aws
 
-Starter [Pulumi](https://www.pulumi.com/) infrastructure for **Databricks MLOps on AWS**: S3 for artifacts, a shared **MLflow** experiment, a **serverless SQL** warehouse, and a **classic job cluster policy** for cost and tag guardrails.
+Starter template for **Databricks on AWS** that combines:
+
+1. **[Medallion lakehouse architecture](https://docs.databricks.com/aws/en/lakehouse/medallion)** — logical **Bronze → Silver → Gold** layers (raw → validated → analytics-ready).
+2. **MLOps-oriented infrastructure** — [Pulumi](https://www.pulumi.com/) provisions S3, a shared **MLflow** experiment path, a **serverless SQL** warehouse, and a **classic job cluster policy**.
+3. **Databricks Asset Bundle** — a single job pipeline runs the template notebooks in order through Gold, then a minimal MLflow training step.
+
+## Medallion layout in this repository
+
+| Layer | Folder | What the template does |
+|-------|--------|-------------------------|
+| **Bronze** | [`medallion/bronze/`](medallion/bronze/) | Append string-typed “raw” events with ingest metadata (`raw_events`). Production systems usually read from S3 or streaming sources instead of the in-notebook sample. |
+| **Silver** | [`medallion/silver/`](medallion/silver/) | Type, trim, filter nulls, dedupe by key → `events_validated`. |
+| **Gold** | [`medallion/gold/`](medallion/gold/) | Daily aggregates by region → `daily_region_metrics` for BI and ML features. |
+| **MLOps** | [`mlops/notebooks/`](mlops/notebooks/) | Read Gold, train a small sklearn model, log to MLflow. |
+
+SQL equivalents live under each layer’s `sql/` directory for teams that prefer Warehouse/SQL pipelines.
+
+The sample domain is generic (event ids, dates, amounts, regions); replace tables and transforms with your own sources.
 
 ## Architecture
 
-The diagram below shows what this repository provisions today (solid lines), how it fits into a broader MLOps platform (dashed), and typical extension points.
+The diagram shows **AWS** (S3, IAM), **Databricks** (medallion layers, jobs, MLflow, SQL warehouse, cluster policy), and how **Pulumi** and **Asset Bundles** fit in.
 
-**Source file (for [Mermaid Live Editor](https://mermaid.live/), Confluence, Notion, or [`mermaid-cli`](https://github.com/mermaid-js/mermaid-cli)):** [`docs/databricks-mlops-aws-architecture.mmd`](docs/databricks-mlops-aws-architecture.mmd)
+**Editable source:** [`docs/databricks-mlops-aws-architecture.mmd`](docs/databricks-mlops-aws-architecture.mmd) — paste into [Mermaid Live Editor](https://mermaid.live/) or render with [`mermaid-cli`](https://github.com/mermaid-js/mermaid-cli).
 
 ```mermaid
 flowchart TB
   subgraph operators [Operators and automation]
     Dev[Developers]
     PulumiCLI[Pulumi CLI / CI]
+    DAB[Databricks Asset Bundle\nbundle deploy / CI]
   end
 
   subgraph aws [AWS account - customer]
-    S3[(S3 bucket\nml artifacts / scoring outputs)]
+    S3Landing[(S3 / object storage\nraw landing optional)]
+    S3Artifacts[(S3 bucket\nml artifacts / outputs)]
     IAM[AWS credentials\nfor Pulumi]
   end
 
-  subgraph databricks [Databricks workspace]
+  subgraph databricks [Databricks workspace AWS]
+    subgraph medallion [Medallion lakehouse layers]
+      Bronze[(Bronze\nraw / minimal validation)]
+      Silver[(Silver\ncleaned / deduped / typed)]
+      Gold[(Gold\naggregates / curated)]
+      Bronze --> Silver --> Gold
+    end
+
     subgraph managed [Platform-managed]
       MLflowReg[MLflow tracking and\nModel Registry]
     end
+
     Exp[MLflow experiment\n/Shared/mlops-experiments-*]
     SQLW[Serverless SQL warehouse\nPRO + serverless compute]
     Policy[Cluster policy\nclassic job clusters]
+    Jobs[Jobs from databricks.yml\nBronze to ML task chain]
   end
 
   Dev --> PulumiCLI
+  Dev --> DAB
   PulumiCLI --> IAM
-  IAM --> S3
+  IAM --> S3Artifacts
   PulumiCLI --> databricks
 
-  Exp -.->|logs runs| MLflowReg
-  Jobs[Jobs / notebooks\nserverless or classic] -.->|optional| SQLW
+  S3Landing -.->|optional batch / file ingest| Bronze
+  DAB --> Jobs
+  Jobs --> Bronze
+  Jobs --> Silver
+  Jobs --> Gold
+  Jobs -.->|train + log| Exp
+  Exp -.->|runs + models| MLflowReg
+  Jobs -.->|read/write artifacts| S3Artifacts
+  Jobs -.->|optional analytics| SQLW
   Jobs -.->|optional classic| Policy
-  Train[Training pipelines] -.->|read/write| S3
-  Train -.->|log metrics| Exp
-
-  style S3 fill:#f4f4f4
-  style Exp fill:#e8f4fc
-  style SQLW fill:#e8f4fc
-  style Policy fill:#fff4e6
-  style MLflowReg fill:#e8fce8
 ```
 
 ### Legend
 
 | Element | Meaning |
 |--------|---------|
-| **S3** | Created by Pulumi: versioning, SSE-S3, block public access. |
-| **MLflow experiment** | Workspace object for shared experiment paths; tracking/registry remain Databricks-managed. |
-| **Serverless SQL warehouse** | Databricks-managed compute (no EC2 in your account for this path). Requires [serverless SQL eligibility](https://docs.databricks.com/sql/admin/serverless.html) on your workspace. |
-| **Cluster policy** | Applies to **classic** VM-backed clusters only, not serverless SQL. |
-| Dashed boxes | Common next steps (jobs, training code, bundles)—not defined in this minimal stack. |
+| **Bronze / Silver / Gold** | Unity Catalog schemas in this template: `{catalog}.bronze`, `.silver`, `.gold` (default catalog `main`). |
+| **S3 (artifacts)** | Bucket created by Pulumi for models, batch outputs, future UC external locations. |
+| **S3 (landing)** | Optional raw file landing; Bronze notebooks can read `s3://` paths on AWS. |
+| **Job pipeline** | Defined in [`databricks.yml`](databricks.yml); tasks run notebooks in medallion + `mlops` order. |
+| **MLflow experiment** | Workspace experiment path from Pulumi: `/Shared/mlops-experiments-{environment}`. |
+| **Serverless SQL warehouse** | Databricks-managed; requires [serverless SQL eligibility](https://docs.databricks.com/sql/admin/serverless.html). |
+| **Cluster policy** | Applies to **classic** VM-backed clusters (for example bundle job clusters), not serverless SQL. |
+| Dashed arrows | Optional or platform-managed paths. |
 
-## What this stack creates
+## What the Pulumi stack creates
 
 | Resource | Provider | Purpose |
 |----------|----------|---------|
@@ -70,10 +101,11 @@ flowchart TB
 
 - [Pulumi CLI](https://www.pulumi.com/docs/install/)
 - [Python 3.9+](https://www.python.org/downloads/)
-- AWS credentials configured for the target account (`aws configure`, environment variables, or IAM role)
-- A Databricks workspace on AWS and a [personal access token](https://docs.databricks.com/dev-tools/auth.html#personal-access-tokens) (or equivalent for CI)
+- AWS credentials for the target account
+- Databricks workspace on AWS and a [personal access token](https://docs.databricks.com/dev-tools/auth.html#personal-access-tokens) (or CI auth)
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) with bundle support, to deploy [`databricks.yml`](databricks.yml)
 
-## Quick start
+## Quick start — infrastructure
 
 ```bash
 cd infra
@@ -91,20 +123,44 @@ pulumi preview
 pulumi up
 ```
 
+## Quick start — medallion + MLOps notebooks (bundle)
+
+1. Edit [`databricks.yml`](databricks.yml): set `targets.dev.workspace.host` to your workspace URL.
+2. Align `variables.experiment_path` with the experiment name Pulumi created (for example `/Shared/mlops-experiments-dev`).
+3. Adjust `variables.spark_version` and `job_clusters` `node_type_id` to match runtimes available in your region.
+
+```bash
+# From repository root
+databricks bundle validate
+databricks bundle deploy --target dev
+```
+
+Run the deployed job from the Databricks UI, or `databricks bundle run medallion_mlops_pipeline --target dev` (exact CLI may vary by CLI version).
+
+You can also import or copy individual notebooks under `medallion/` and `mlops/` into the workspace and run them manually in Bronze → Silver → Gold → ML order.
+
 ## Configuration
 
 | Key | Namespace | Description |
 |-----|-----------|-------------|
-| `environment` | `databricks-mlops-aws` | Suffix for resource names (default: `dev` if unset in code). |
-| `aws:region` | `aws` | Region for S3 and the default provider. |
+| `environment` | `databricks-mlops-aws` | Suffix for resource names (default `dev` in code if unset). |
+| `aws:region` | `aws` | Region for S3 and the default AWS provider. |
 | `host` | `databricks` | Workspace URL, e.g. `https://dbc-xxxx.cloud.databricks.com`. |
-| `token` | `databricks` | PAT (store with `pulumi config set --secret`). |
+| `token` | `databricks` | PAT (`pulumi config set --secret`). |
 
-Alternatively, the Databricks provider can use `DATABRICKS_HOST` and `DATABRICKS_TOKEN` environment variables instead of Pulumi config.
+Environment variables `DATABRICKS_HOST` and `DATABRICKS_TOKEN` can be used instead of Pulumi config for the Databricks provider.
+
+### Bundle variables (`databricks.yml`)
+
+| Variable | Purpose |
+|----------|---------|
+| `catalog` | Unity Catalog catalog for `bronze` / `silver` / `gold` schemas (default `main`). |
+| `spark_version` | Cluster runtime for the job (must exist in your workspace). |
+| `experiment_path` | MLflow experiment for the training notebook. |
 
 ## Stack outputs
 
-After `pulumi up`, exports include:
+After `pulumi up`:
 
 - `aws_region`
 - `ml_artifacts_bucket`
@@ -112,35 +168,46 @@ After `pulumi up`, exports include:
 - `serverless_sql_warehouse_id`
 - `ml_job_cluster_policy_id`
 
+Attach `ml_job_cluster_policy_id` to bundle job clusters if you want the same guardrails (requires updating `databricks.yml` to reference the policy).
+
 ## Repository layout
 
 ```
 DataBricks/
-├── README.md                 # This file
+├── README.md
+├── databricks.yml              # Asset Bundle: medallion + ML training job
 ├── docs/
-│   └── databricks-mlops-aws-architecture.mmd   # Mermaid diagram source
+│   └── databricks-mlops-aws-architecture.mmd
+├── medallion/
+│   ├── README.md
+│   ├── bronze/                 # Raw landing templates
+│   ├── silver/                 # Validation / dedupe templates
+│   └── gold/                   # Curated aggregates templates
+├── mlops/
+│   ├── README.md
+│   └── notebooks/              # MLflow training template
 └── infra/
-    ├── Pulumi.yaml           # Project name and Python runtime
+    ├── Pulumi.yaml
     ├── Pulumi.dev.yaml.example
-    ├── requirements.txt      # pulumi-aws, pulumi-databricks
-    ├── __main__.py           # Stack definition
+    ├── requirements.txt
+    ├── __main__.py
     └── .gitignore
 ```
 
-Copy `Pulumi.dev.yaml.example` to `Pulumi.dev.yaml` locally; real stack files with secrets are gitignored.
-
 ## Extensions (typical next steps)
 
-- **Unity Catalog**: external locations, storage credentials, catalogs and grants (often account-level).
-- **IAM**: instance profiles or storage credentials so Databricks can read/write the S3 bucket; bucket policies aligned with your workspace deployment model.
-- **Jobs and bundles**: [Databricks Asset Bundles](https://docs.databricks.com/dev-tools/bundles/index.html) plus Pulumi or CI for job deployment.
-- **Model Serving**: `ModelServing` resources once you have endpoint configuration.
-- **CI/CD**: GitHub Actions (or similar) with OIDC to AWS and encrypted Pulumi stacks.
+- **Unity Catalog**: external locations on the S3 bucket, storage credentials, grants — align Bronze reads with `EXTERNAL LOCATION` and managed ingestion.
+- **Lakeflow / Delta Live Tables**: orchestrate Bronze→Silver→Gold with expectations and SLAs.
+- **Feature Store**: publish Gold or Silver tables as feature tables for training and serving.
+- **Model Serving**: deploy registered models to serverless or classic serving endpoints.
+- **CI/CD**: GitHub Actions with OIDC to AWS, `pulumi up`, and `databricks bundle deploy` on merge.
 
 ## References
 
+- [What is the medallion lakehouse architecture?](https://docs.databricks.com/aws/en/lakehouse/medallion) (Databricks on AWS)
+- [Databricks Asset Bundles](https://docs.databricks.com/dev-tools/bundles/index.html)
 - [Databricks on AWS](https://docs.databricks.com/getting-started/overview.html)
-- [Pulumi AWS](https://www.pulumi.com/registry/packages/aws/) and [Pulumi Databricks](https://www.pulumi.com/registry/packages/databricks/) packages
+- [Pulumi AWS](https://www.pulumi.com/registry/packages/aws/) and [Pulumi Databricks](https://www.pulumi.com/registry/packages/databricks/)
 - [Serverless SQL warehouses](https://docs.databricks.com/sql/admin/serverless.html)
 
 ## License

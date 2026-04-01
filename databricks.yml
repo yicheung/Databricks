@@ -1,0 +1,78 @@
+# Databricks Asset Bundle — Medallion (Bronze → Silver → Gold) + MLOps training task
+# Docs: https://docs.databricks.com/dev-tools/bundles/index.html
+# Validate: databricks bundle validate
+# Deploy:   databricks bundle deploy --target dev
+
+bundle:
+  name: medallion-mlops-aws-template
+
+sync:
+  exclude:
+    - .git/**
+    - infra/**
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+    - venv/**
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for bronze/silver/gold schemas
+    default: main
+  spark_version:
+    description: Runtime for the shared job cluster (match an available LTS in your workspace)
+    default: 14.3.x-scala2.12
+  experiment_path:
+    description: MLflow experiment path (align with Pulumi-created /Shared/mlops-experiments-* )
+    default: /Shared/mlops-experiments-dev
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://YOUR_WORKSPACE.cloud.databricks.com
+
+resources:
+  jobs:
+    medallion_mlops_pipeline:
+      name: medallion-bronze-silver-gold-mlops
+      job_clusters:
+        - job_cluster_key: medallion_cluster
+          new_cluster:
+            spark_version: ${var.spark_version}
+            node_type_id: i3.xlarge
+            num_workers: 1
+            data_security_mode: SINGLE_USER
+            # Optional: add policy_id from Pulumi output ml_job_cluster_policy_id for classic cluster guardrails
+      tasks:
+        - task_key: bronze_ingest
+          job_cluster_key: medallion_cluster
+          notebook_task:
+            notebook_path: ./medallion/bronze/01_bronze_append_raw
+            base_parameters:
+              catalog: ${var.catalog}
+        - task_key: silver_validate
+          job_cluster_key: medallion_cluster
+          depends_on:
+            - task_key: bronze_ingest
+          notebook_task:
+            notebook_path: ./medallion/silver/02_silver_clean_validate
+            base_parameters:
+              catalog: ${var.catalog}
+        - task_key: gold_metrics
+          job_cluster_key: medallion_cluster
+          depends_on:
+            - task_key: silver_validate
+          notebook_task:
+            notebook_path: ./medallion/gold/03_gold_daily_metrics
+            base_parameters:
+              catalog: ${var.catalog}
+        - task_key: ml_train
+          job_cluster_key: medallion_cluster
+          depends_on:
+            - task_key: gold_metrics
+          notebook_task:
+            notebook_path: ./mlops/notebooks/04_train_and_log_mlflow
+            base_parameters:
+              catalog: ${var.catalog}
+              experiment_path: ${var.experiment_path}

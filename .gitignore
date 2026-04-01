@@ -1,0 +1,12 @@
+# Databricks Asset Bundle local state
+.databricks/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local Pulumi stack secrets (example copy lives in infra/)
+**/Pulumi.*.yaml
+!**/Pulumi.*.yaml.example

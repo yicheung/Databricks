@@ -1,4 +1,5 @@
-%% databricks-mlops-aws — architecture (Mermaid source)
+%% databricks-mlops-aws + medallion — architecture (Mermaid source)
+%% Medallion reference: https://docs.databricks.com/aws/en/lakehouse/medallion
 %% Use in GitHub/GitLab by pasting into a fenced ```mermaid block, or open with https://mermaid.live/
 %% Optional CLI: npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-architecture.mmd -o architecture.svg
 
@@ -6,34 +7,55 @@ flowchart TB
   subgraph operators [Operators and automation]
     Dev[Developers]
     PulumiCLI[Pulumi CLI / CI]
+    DAB[Databricks Asset Bundle\nbundle deploy / CI]
   end
 
   subgraph aws [AWS account - customer]
-    S3[(S3 bucket\nml artifacts / scoring outputs)]
+    S3Landing[(S3 / object storage\nraw landing optional)]
+    S3Artifacts[(S3 bucket\nml artifacts / outputs)]
     IAM[AWS credentials\nfor Pulumi]
   end
 
-  subgraph databricks [Databricks workspace]
+  subgraph databricks [Databricks workspace AWS]
+    subgraph medallion [Medallion lakehouse layers]
+      Bronze[(Bronze\nraw / minimal validation)]
+      Silver[(Silver\ncleaned / deduped / typed)]
+      Gold[(Gold\naggregates / curated)]
+      Bronze --> Silver --> Gold
+    end
+
     subgraph managed [Platform-managed]
       MLflowReg[MLflow tracking and\nModel Registry]
     end
+
     Exp[MLflow experiment\n/Shared/mlops-experiments-*]
     SQLW[Serverless SQL warehouse\nPRO + serverless compute]
     Policy[Cluster policy\nclassic job clusters]
+    Jobs[Jobs from databricks.yml\nBronze to ML task chain]
   end
 
   Dev --> PulumiCLI
+  Dev --> DAB
   PulumiCLI --> IAM
-  IAM --> S3
+  IAM --> S3Artifacts
   PulumiCLI --> databricks
 
-  Exp -.->|logs runs| MLflowReg
-  Jobs[Jobs / notebooks\nserverless or classic] -.->|optional| SQLW
+  S3Landing -.->|optional batch / file ingest| Bronze
+  DAB --> Jobs
+  Jobs --> Bronze
+  Jobs --> Silver
+  Jobs --> Gold
+  Jobs -.->|train + log| Exp
+  Exp -.->|runs + models| MLflowReg
+  Jobs -.->|read/write artifacts| S3Artifacts
+  Jobs -.->|optional analytics| SQLW
   Jobs -.->|optional classic| Policy
-  Train[Training pipelines] -.->|read/write| S3
-  Train -.->|log metrics| Exp
 
-  style S3 fill:#f4f4f4
+  style S3Landing fill:#f4f4f4
+  style S3Artifacts fill:#f4f4f4
+  style Bronze fill:#cd7f32
+  style Silver fill:#c0c0c0
+  style Gold fill:#ffd700
   style Exp fill:#e8f4fc
   style SQLW fill:#e8f4fc
   style Policy fill:#fff4e6
