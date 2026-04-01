@@ -1,62 +1,48 @@
-%% databricks-mlops-aws + medallion — architecture (Mermaid source)
-%% Medallion reference: https://docs.databricks.com/aws/en/lakehouse/medallion
-%% Use in GitHub/GitLab by pasting into a fenced ```mermaid block, or open with https://mermaid.live/
-%% Optional CLI: npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-architecture.mmd -o architecture.svg
+---
+title: Databricks + AWS platform (architecture-beta)
+config:
+  theme: neutral
+  look: classic
+  architecture:
+    randomize: false
+---
+architecture-beta
+  group ops(cloud)[Automation and operators]
+  service dev(server)[Developers] in ops
+  service pulumi(server)[Pulumi / CI] in ops
+  service bundle(server)[Databricks Asset Bundle] in ops
 
-flowchart TB
-  subgraph operators [Operators and automation]
-    Dev[Developers]
-    PulumiCLI[Pulumi CLI / CI]
-    DAB[Databricks Asset Bundle\nbundle deploy / CI]
-  end
+  group aws(disk)[AWS account]
+  service s3land(disk)[S3 landing optional] in aws
+  service s3ml(disk)[S3 ML artifacts] in aws
+  service iam(server)[IAM credentials] in aws
 
-  subgraph aws [AWS account - customer]
-    S3Landing[(S3 / object storage\nraw landing optional)]
-    S3Artifacts[(S3 bucket\nml artifacts / outputs)]
-    IAM[AWS credentials\nfor Pulumi]
-  end
+  group dbx(cloud)[Databricks workspace]
+  group medallion(database)[Medallion UC layers] in dbx
+  service bronze(database)[Bronze raw] in medallion
+  service silver(database)[Silver validated] in medallion
+  service gold(database)[Gold curated] in medallion
 
-  subgraph databricks [Databricks workspace AWS]
-    subgraph medallion [Medallion lakehouse layers]
-      Bronze[(Bronze\nraw / minimal validation)]
-      Silver[(Silver\ncleaned / deduped / typed)]
-      Gold[(Gold\naggregates / curated)]
-      Bronze --> Silver --> Gold
-    end
+  service jobs(server)[Jobs databricks.yml] in dbx
+  service mfexp(database)[MLflow experiment] in dbx
+  service mfreg(database)[Model Registry] in dbx
+  service sqlw(server)[Serverless SQL WH] in dbx
+  service policy(server)[Classic cluster policy] in dbx
 
-    subgraph managed [Platform-managed]
-      MLflowReg[MLflow tracking and\nModel Registry]
-    end
-
-    Exp[MLflow experiment\n/Shared/mlops-experiments-*]
-    SQLW[Serverless SQL warehouse\nPRO + serverless compute]
-    Policy[Cluster policy\nclassic job clusters]
-    Jobs[Jobs from databricks.yml\nBronze to ML task chain]
-  end
-
-  Dev --> PulumiCLI
-  Dev --> DAB
-  PulumiCLI --> IAM
-  IAM --> S3Artifacts
-  PulumiCLI --> databricks
-
-  S3Landing -.->|optional batch / file ingest| Bronze
-  DAB --> Jobs
-  Jobs --> Bronze
-  Jobs --> Silver
-  Jobs --> Gold
-  Jobs -.->|train + log| Exp
-  Exp -.->|runs + models| MLflowReg
-  Jobs -.->|read/write artifacts| S3Artifacts
-  Jobs -.->|optional analytics| SQLW
-  Jobs -.->|optional classic| Policy
-
-  style S3Landing fill:#f4f4f4
-  style S3Artifacts fill:#f4f4f4
-  style Bronze fill:#cd7f32
-  style Silver fill:#c0c0c0
-  style Gold fill:#ffd700
-  style Exp fill:#e8f4fc
-  style SQLW fill:#e8f4fc
-  style Policy fill:#fff4e6
-  style MLflowReg fill:#e8fce8
+  dev:R --> L:pulumi
+  dev:R --> L:bundle
+  pulumi:B --> T:iam
+  iam:R --> L:s3ml
+  bundle:B --> T:jobs
+  s3land:R --> L:bronze
+  jobs:R --> L:bronze
+  bronze:R --> L:silver
+  silver:R --> L:gold
+  jobs:B --> T:mfexp
+  mfexp:B --> T:mfreg
+  jobs:R --> L:s3ml
+  jobs:B --> T:sqlw
+  jobs:B --> T:policy
+%% Companion: docs/databricks-mlops-aws-layers.mmd (block-beta), docs/databricks-mlops-aws-flowchart.mmd (flowchart).
+%% architecture-beta requires Mermaid v11.1+. Spec: https://mermaid.js.org/syntax/architecture.html
+%% mmdc renders the first diagram only; use separate -i per file for batch SVG export.

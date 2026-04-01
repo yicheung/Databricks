@@ -1,0 +1,61 @@
+%%{init: { "theme": "neutral", "look": "classic", "flowchart": { "defaultRenderer": "elk" } } }%%
+flowchart TB
+  subgraph operators [Operators and automation]
+    Dev[Developers]
+    PulumiCLI[Pulumi CLI / CI]
+    DAB[Databricks Asset Bundle]
+  end
+
+  subgraph aws [AWS account]
+    S3Landing[(S3 landing optional)]
+    S3Artifacts[(S3 ML artifacts)]
+    IAM[IAM / Pulumi creds]
+  end
+
+  subgraph databricks [Databricks workspace]
+    subgraph medallion [Medallion UC]
+      Bronze[(Bronze)]
+      Silver[(Silver)]
+      Gold[(Gold)]
+      Bronze --> Silver --> Gold
+    end
+    subgraph managed [Platform-managed]
+      MLflowReg[MLflow + Registry]
+    end
+    Exp[MLflow experiment]
+    SQLW[Serverless SQL warehouse]
+    Policy[Classic cluster policy]
+    Jobs[Jobs pipeline]
+  end
+
+  Dev --> PulumiCLI
+  Dev --> DAB
+  PulumiCLI --> IAM
+  IAM --> S3Artifacts
+  PulumiCLI --> databricks
+
+  S3Landing -.->|optional ingest| Bronze
+  DAB --> Jobs
+  Jobs --> Bronze
+  Jobs --> Silver
+  Jobs --> Gold
+  Jobs -.->|train + log| Exp
+  Exp -.-> MLflowReg
+  Jobs -.-> S3Artifacts
+  Jobs -.-> SQLW
+  Jobs -.-> Policy
+
+  classDef aws fill:#f0f0f0,stroke:#666,color:#111
+  classDef bronze fill:#e8d4c0,stroke:#8b4513,color:#111
+  classDef silver fill:#e2e2e5,stroke:#555,color:#111
+  classDef gold fill:#fff1a8,stroke:#b8860b,color:#111
+  classDef platform fill:#e8f4fc,stroke:#2a6a9e,color:#111
+  classDef ml fill:#e8fce8,stroke:#2d6a2d,color:#111
+
+  class S3Landing,S3Artifacts,IAM aws
+  class Bronze bronze
+  class Silver silver
+  class Gold gold
+  class Exp,SQLW,Policy,Jobs platform
+  class MLflowReg ml
+%% Flowchart + ELK layout + classDef: works in Mermaid Live; GitHub may fall back to default layout if ELK is unavailable.

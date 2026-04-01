@@ -21,40 +21,55 @@ The sample domain is generic (event ids, dates, amounts, regions); replace table
 
 ## Architecture
 
-The diagram shows **AWS** (S3, IAM), **Databricks** (medallion layers, jobs, MLflow, SQL warehouse, cluster policy), and how **Pulumi** and **Asset Bundles** fit in.
+The diagrams show **AWS** (S3, IAM), **Databricks** (medallion layers, jobs, MLflow, SQL warehouse, cluster policy), and how **Pulumi** and **Asset Bundles** fit in.
 
-**Editable source:** [`docs/databricks-mlops-aws-architecture.mmd`](docs/databricks-mlops-aws-architecture.mmd) — paste into [Mermaid Live Editor](https://mermaid.live/) or render with [`mermaid-cli`](https://github.com/mermaid-js/mermaid-cli).
+### Mermaid sources (pick by renderer)
+
+| File | Diagram type | Best for |
+|------|----------------|----------|
+| [`docs/databricks-mlops-aws-architecture.mmd`](docs/databricks-mlops-aws-architecture.mmd) | [`architecture-beta`](https://mermaid.js.org/syntax/architecture.html) (YAML frontmatter, groups, built-in icons) | Cloud-style service map in [Mermaid Live](https://mermaid.live/) or **Mermaid v11.1+** |
+| [`docs/databricks-mlops-aws-layers.mmd`](docs/databricks-mlops-aws-layers.mmd) | [`block-beta`](https://mermaid.js.org/syntax/block.html) (column grid, link labels, `classDef`) | Fixed layout “layers” view; **Mermaid v11+** |
+| [`docs/databricks-mlops-aws-flowchart.mmd`](docs/databricks-mlops-aws-flowchart.mmd) | `flowchart` + [`%%{init}%%`](https://mermaid.js.org/config/directives.html) (neutral theme, **ELK** layout, `classDef`) | Wide tooling support; ELK gives cleaner layout where the runtime [registers the ELK loader](https://mermaid.js.org/config/layouts.html) |
+
+`mmdc` renders **one** diagram per input file. Export examples:
+
+```bash
+npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-architecture.mmd -o docs/out/architecture-beta.svg
+npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-layers.mmd -o docs/out/layers-block.svg
+npx @mermaid-js/mermaid-cli -i docs/databricks-mlops-aws-flowchart.mmd -o docs/out/flowchart-elk.svg
+```
+
+The preview below matches the flowchart file but **omits the ELK renderer** so it stays compatible with common Markdown hosts (for example GitHub) that do not load the ELK plugin.
 
 ```mermaid
+%%{init: { "theme": "neutral" } }%%
 flowchart TB
   subgraph operators [Operators and automation]
     Dev[Developers]
     PulumiCLI[Pulumi CLI / CI]
-    DAB[Databricks Asset Bundle\nbundle deploy / CI]
+    DAB[Databricks Asset Bundle]
   end
 
-  subgraph aws [AWS account - customer]
-    S3Landing[(S3 / object storage\nraw landing optional)]
-    S3Artifacts[(S3 bucket\nml artifacts / outputs)]
-    IAM[AWS credentials\nfor Pulumi]
+  subgraph aws [AWS account]
+    S3Landing[(S3 landing optional)]
+    S3Artifacts[(S3 ML artifacts)]
+    IAM[IAM / Pulumi creds]
   end
 
-  subgraph databricks [Databricks workspace AWS]
-    subgraph medallion [Medallion lakehouse layers]
-      Bronze[(Bronze\nraw / minimal validation)]
-      Silver[(Silver\ncleaned / deduped / typed)]
-      Gold[(Gold\naggregates / curated)]
+  subgraph databricks [Databricks workspace]
+    subgraph medallion [Medallion UC]
+      Bronze[(Bronze)]
+      Silver[(Silver)]
+      Gold[(Gold)]
       Bronze --> Silver --> Gold
     end
-
     subgraph managed [Platform-managed]
-      MLflowReg[MLflow tracking and\nModel Registry]
+      MLflowReg[MLflow + Registry]
     end
-
-    Exp[MLflow experiment\n/Shared/mlops-experiments-*]
-    SQLW[Serverless SQL warehouse\nPRO + serverless compute]
-    Policy[Cluster policy\nclassic job clusters]
-    Jobs[Jobs from databricks.yml\nBronze to ML task chain]
+    Exp[MLflow experiment]
+    SQLW[Serverless SQL warehouse]
+    Policy[Classic cluster policy]
+    Jobs[Jobs pipeline]
   end
 
   Dev --> PulumiCLI
@@ -63,16 +78,30 @@ flowchart TB
   IAM --> S3Artifacts
   PulumiCLI --> databricks
 
-  S3Landing -.->|optional batch / file ingest| Bronze
+  S3Landing -.->|optional ingest| Bronze
   DAB --> Jobs
   Jobs --> Bronze
   Jobs --> Silver
   Jobs --> Gold
   Jobs -.->|train + log| Exp
-  Exp -.->|runs + models| MLflowReg
-  Jobs -.->|read/write artifacts| S3Artifacts
-  Jobs -.->|optional analytics| SQLW
-  Jobs -.->|optional classic| Policy
+  Exp -.-> MLflowReg
+  Jobs -.-> S3Artifacts
+  Jobs -.-> SQLW
+  Jobs -.-> Policy
+
+  classDef aws fill:#f0f0f0,stroke:#666,color:#111
+  classDef bronze fill:#e8d4c0,stroke:#8b4513,color:#111
+  classDef silver fill:#e2e2e5,stroke:#555,color:#111
+  classDef gold fill:#fff1a8,stroke:#b8860b,color:#111
+  classDef platform fill:#e8f4fc,stroke:#2a6a9e,color:#111
+  classDef ml fill:#e8fce8,stroke:#2d6a2d,color:#111
+
+  class S3Landing,S3Artifacts,IAM aws
+  class Bronze bronze
+  class Silver silver
+  class Gold gold
+  class Exp,SQLW,Policy,Jobs platform
+  class MLflowReg ml
 ```
 
 ### Legend
@@ -177,7 +206,9 @@ DataBricks/
 ├── README.md
 ├── databricks.yml              # Asset Bundle: medallion + ML training job
 ├── docs/
-│   └── databricks-mlops-aws-architecture.mmd
+│   ├── databricks-mlops-aws-architecture.mmd   # architecture-beta (v11.1+)
+│   ├── databricks-mlops-aws-layers.mmd         # block-beta layers (v11+)
+│   └── databricks-mlops-aws-flowchart.mmd      # flowchart + ELK + classDef
 ├── medallion/
 │   ├── README.md
 │   ├── bronze/                 # Raw landing templates
@@ -204,6 +235,9 @@ DataBricks/
 
 ## References
 
+- [Mermaid architecture diagrams (`architecture-beta`)](https://mermaid.js.org/syntax/architecture.html)
+- [Mermaid block diagrams (`block-beta`)](https://mermaid.js.org/syntax/block.html)
+- [Mermaid layouts (ELK, etc.)](https://mermaid.js.org/config/layouts.html)
 - [What is the medallion lakehouse architecture?](https://docs.databricks.com/aws/en/lakehouse/medallion) (Databricks on AWS)
 - [Databricks Asset Bundles](https://docs.databricks.com/dev-tools/bundles/index.html)
 - [Databricks on AWS](https://docs.databricks.com/getting-started/overview.html)

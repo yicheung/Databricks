@@ -1,0 +1,27 @@
+---
+title: Medallion layers and control plane (block-beta)
+config:
+  theme: neutral
+  look: classic
+---
+block-beta
+  columns 5
+  ops["Operators and CI/CD"]:5
+  dev["Developers"] pulumi["Pulumi"] dab["Asset Bundle"] space:2
+  aws["AWS account"]:5
+  s3in["S3 landing"] s3out["S3 artifacts"] iam["IAM / creds"] space:2
+  dbx["Databricks workspace"]:5
+  bronzeLayer["Bronze"] silverLayer["Silver"] goldLayer["Gold"] jobsCtrl["Jobs"] mlflowStore["MLflow"]
+  bronzeLayer -->|typed and deduped| silverLayer
+  silverLayer -->|curated metrics| goldLayer
+  jobsCtrl -->|pipeline| bronzeLayer
+  goldLayer -->|features and logs| mlflowStore
+  classDef awsfill fill:#f0f0f0,stroke:#666,color:#111
+  classDef medB fill:#e8d4c0,stroke:#8b4513,color:#111
+  classDef medS fill:#e2e2e5,stroke:#555,color:#111
+  classDef medG fill:#fff1a8,stroke:#b8860b,color:#111
+  class s3in,s3out,iam awsfill
+  class bronzeLayer medB
+  class silverLayer medS
+  class goldLayer medG
+%% block-beta: https://mermaid.js.org/syntax/block.html (Mermaid v11+)
